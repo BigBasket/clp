@@ -30,6 +30,10 @@ public:
     // Methods
     ParsingResult parse_arguments(int argc, char const* argv[]) override;
 
+    const std::string &get_search_controller_host() const { return m_search_controller_host; }
+        
+    const std::string &get_search_controller_port() const { return m_search_controller_port; }
+
     std::string const& get_search_strings_file_path() const { return m_search_strings_file_path; }
 
     bool ignore_case() const { return m_ignore_case; }
@@ -53,6 +57,8 @@ private:
     void print_basic_usage() const override;
 
     // Variables
+    std::string m_search_controller_host;
+    std::string m_search_controller_port;
     std::string m_search_strings_file_path;
     bool m_ignore_case;
     std::string m_archives_dir;

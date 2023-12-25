@@ -1,4 +1,6 @@
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <memory>
 
 #include <filesystem>
 #include <iostream>
@@ -15,6 +17,9 @@
 #include "../streaming_archive/Constants.hpp"
 #include "../Utils.hpp"
 #include "CommandLineArguments.hpp"
+#include "ControllerMonitoringThread.hpp"
+#include "../networking/socket_utils.hpp"
+#include "../Utils.hpp"
 
 using clg::CommandLineArguments;
 using std::cerr;
@@ -28,6 +33,15 @@ using streaming_archive::reader::Archive;
 using streaming_archive::reader::File;
 using streaming_archive::reader::Message;
 
+
+/**
+ * Connects to the search controller
+ * @param controller_host
+ * @param controller_port
+ * @return -1 on failure
+ * @return Search controller socket file descriptor otherwise
+ */
+static int connect_to_search_controller(const string &controller_host, const string &controller_port);
 /**
  * Opens the archive and reads the dictionaries
  * @param archive_path
@@ -72,7 +86,9 @@ static size_t search_files(
         vector<Query>& queries,
         CommandLineArguments::OutputMethod output_method,
         Archive& archive,
-        MetadataDB::FileIterator& file_metadata_ix
+        MetadataDB::FileIterator& file_metadata_ix,
+        const std::atomic_bool &query_cancelled,
+        int controller_socket_fd
 );
 /**
  * Prints search result to stdout in text format
@@ -129,6 +145,55 @@ static GlobalMetadataDB::ArchiveIterator* get_archive_iterator(
     } else {
         return global_metadata_db.get_archive_iterator_for_time_window(begin_ts, end_ts);
     }
+}
+
+static int connect_to_search_controller(const string &controller_host, const string &controller_port)
+{
+    // Get address info for controller
+    struct addrinfo hints = {};
+    // Address can be IPv4 or IPV6
+    hints.ai_family = AF_UNSPEC;
+    // TCP socket
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = 0;
+    hints.ai_protocol = 0;
+    struct addrinfo *addresses_head = nullptr;
+    int error = getaddrinfo(controller_host.c_str(), controller_port.c_str(), &hints, &addresses_head);
+    if (0 != error)
+    {
+        SPDLOG_ERROR("Failed to get address information for search controller, error={}", error);
+        return -1;
+    }
+
+    // Try each address until a socket can be created and connected to
+    int controller_socket_fd = -1;
+    for (auto curr = addresses_head; nullptr != curr; curr = curr->ai_next)
+    {
+        // Create socket
+        controller_socket_fd = socket(curr->ai_family, curr->ai_socktype, curr->ai_protocol);
+        if (-1 == controller_socket_fd)
+        {
+            continue;
+        }
+
+        // Connect to address
+        if (connect(controller_socket_fd, curr->ai_addr, curr->ai_addrlen) != -1)
+        {
+            break;
+        }
+
+        // Failed to connect, so close socket
+        close(controller_socket_fd);
+        controller_socket_fd = -1;
+    }
+    freeaddrinfo(addresses_head);
+    if (-1 == controller_socket_fd)
+    {
+        SPDLOG_ERROR("Failed to connect to search controller, errno={}", errno);
+        return -1;
+    }
+
+    return controller_socket_fd;
 }
 
 static bool open_archive(string const& archive_path, Archive& archive_reader) {
@@ -194,7 +259,9 @@ static bool search(
         Archive& archive,
         log_surgeon::lexers::ByteLexer& forward_lexer,
         log_surgeon::lexers::ByteLexer& reverse_lexer,
-        bool use_heuristic
+        bool use_heuristic,
+        const std::atomic_bool &query_cancelled, 
+        int controller_socket_fd
 ) {
     ErrorCode error_code;
     auto search_begin_ts = command_line_args.get_search_begin_ts();
@@ -256,7 +323,9 @@ static bool search(
                         queries,
                         command_line_args.get_output_method(),
                         archive,
-                        *file_metadata_ix
+                        *file_metadata_ix,
+                        query_cancelled, 
+                        controller_socket_fd
                 );
             } else {
                 auto file_metadata_ix_ptr = archive.get_file_iterator(
@@ -270,7 +339,9 @@ static bool search(
                         queries,
                         command_line_args.get_output_method(),
                         archive,
-                        file_metadata_ix
+                        file_metadata_ix,
+                        query_cancelled, 
+                        controller_socket_fd
                 );
                 for (auto segment_id : ids_of_segments_to_search) {
                     file_metadata_ix.set_segment_id(segment_id);
@@ -278,7 +349,9 @@ static bool search(
                             queries,
                             command_line_args.get_output_method(),
                             archive,
-                            file_metadata_ix
+                            file_metadata_ix,
+                            query_cancelled, 
+                            controller_socket_fd
                     );
                 }
             }
@@ -335,7 +408,9 @@ static size_t search_files(
         vector<Query>& queries,
         CommandLineArguments::OutputMethod const output_method,
         Archive& archive,
-        MetadataDB::FileIterator& file_metadata_ix
+        MetadataDB::FileIterator& file_metadata_ix,
+        const std::atomic_bool &query_cancelled, 
+        int controller_socket_fd
 ) {
     size_t num_matches = 0;
 
@@ -370,7 +445,9 @@ static size_t search_files(
                         archive,
                         compressed_file,
                         output_func,
-                        output_func_arg
+                        output_func_arg,
+                        query_cancelled, 
+                        controller_socket_fd
                 );
             }
         }
@@ -455,178 +532,229 @@ int main(int argc, char const* argv[]) {
         spdlog::set_pattern("%Y-%m-%d %H:%M:%S,%e [%l] %v");
     } catch (std::exception& e) {
         // NOTE: We can't log an exception if the logger couldn't be constructed
+        std::cout << e.what();
         return -1;
     }
-    Profiler::init();
-    TimestampPattern::init();
+    try {
+        Profiler::init();
+        TimestampPattern::init();
 
-    CommandLineArguments command_line_args("clg");
-    auto parsing_result = command_line_args.parse_arguments(argc, argv);
-    switch (parsing_result) {
-        case CommandLineArgumentsBase::ParsingResult::Failure:
-            return -1;
-        case CommandLineArgumentsBase::ParsingResult::InfoCommand:
-            return 0;
-        case CommandLineArgumentsBase::ParsingResult::Success:
-            // Continue processing
-            break;
-    }
-
-    Profiler::start_continuous_measurement<Profiler::ContinuousMeasurementIndex::Search>();
-
-    // Create vector of search strings
-    vector<string> search_strings;
-    if (command_line_args.get_search_strings_file_path().empty()) {
-        search_strings.push_back(command_line_args.get_search_string());
-    } else {
-        FileReader file_reader;
-        file_reader.open(command_line_args.get_search_strings_file_path());
-        string line;
-        while (file_reader.read_to_delimiter('\n', false, false, line)) {
-            if (!line.empty()) {
-                search_strings.push_back(line);
-            }
-        }
-        file_reader.close();
-    }
-
-    // Validate archives directory
-    struct stat archives_dir_stat = {};
-    auto archives_dir = std::filesystem::path(command_line_args.get_archives_dir());
-    if (0 != stat(archives_dir.c_str(), &archives_dir_stat)) {
-        SPDLOG_ERROR(
-                "'{}' does not exist or cannot be accessed - {}.",
-                archives_dir.c_str(),
-                strerror(errno)
-        );
-        return -1;
-    } else if (S_ISDIR(archives_dir_stat.st_mode) == false) {
-        SPDLOG_ERROR("'{}' is not a directory.", archives_dir.c_str());
-        return -1;
-    }
-
-    auto const& global_metadata_db_config = command_line_args.get_metadata_db_config();
-    std::unique_ptr<GlobalMetadataDB> global_metadata_db;
-    switch (global_metadata_db_config.get_metadata_db_type()) {
-        case GlobalMetadataDBConfig::MetadataDBType::SQLite: {
-            auto global_metadata_db_path = archives_dir / streaming_archive::cMetadataDBFileName;
-            global_metadata_db
-                    = std::make_unique<GlobalSQLiteMetadataDB>(global_metadata_db_path.string());
-            break;
-        }
-        case GlobalMetadataDBConfig::MetadataDBType::MySQL:
-            global_metadata_db = std::make_unique<GlobalMySQLMetadataDB>(
-                    global_metadata_db_config.get_metadata_db_host(),
-                    global_metadata_db_config.get_metadata_db_port(),
-                    global_metadata_db_config.get_metadata_db_username(),
-                    global_metadata_db_config.get_metadata_db_password(),
-                    global_metadata_db_config.get_metadata_db_name(),
-                    global_metadata_db_config.get_metadata_table_prefix()
-            );
-            break;
-    }
-    global_metadata_db->open();
-
-    // TODO: if performance is too slow, can make this more efficient by only diffing files with the
-    // same checksum
-    uint32_t const max_map_schema_length = 100'000;
-    std::map<std::string, log_surgeon::lexers::ByteLexer> forward_lexer_map;
-    std::map<std::string, log_surgeon::lexers::ByteLexer> reverse_lexer_map;
-    log_surgeon::lexers::ByteLexer one_time_use_forward_lexer;
-    log_surgeon::lexers::ByteLexer one_time_use_reverse_lexer;
-    log_surgeon::lexers::ByteLexer* forward_lexer_ptr;
-    log_surgeon::lexers::ByteLexer* reverse_lexer_ptr;
-
-    string archive_id;
-    Archive archive_reader;
-    for (auto archive_ix = std::unique_ptr<GlobalMetadataDB::ArchiveIterator>(get_archive_iterator(
-                 *global_metadata_db,
-                 command_line_args.get_file_path(),
-                 command_line_args.get_search_begin_ts(),
-                 command_line_args.get_search_end_ts()
-         ));
-         archive_ix->contains_element();
-         archive_ix->get_next())
-    {
-        archive_ix->get_id(archive_id);
-        auto archive_path = archives_dir / archive_id;
-
-        if (false == std::filesystem::exists(archive_path)) {
-            SPDLOG_WARN(
-                    "Archive {} does not exist in '{}'.",
-                    archive_id,
-                    command_line_args.get_archives_dir()
-            );
-            continue;
+        CommandLineArguments command_line_args("clg");
+        auto parsing_result = command_line_args.parse_arguments(argc, argv);
+        switch (parsing_result) {
+            case CommandLineArgumentsBase::ParsingResult::Failure:
+                return -1;
+            case CommandLineArgumentsBase::ParsingResult::InfoCommand:
+                return 0;
+            case CommandLineArgumentsBase::ParsingResult::Success:
+                // Continue processing
+                break;
         }
 
-        // Open archive
-        if (!open_archive(archive_path.string(), archive_reader)) {
-            return -1;
-        }
+        Profiler::start_continuous_measurement<Profiler::ContinuousMeasurementIndex::Search>();
 
-        // Generate lexer if schema file exists
-        auto schema_file_path = archive_path / streaming_archive::cSchemaFileName;
-        bool use_heuristic = true;
-        if (std::filesystem::exists(schema_file_path)) {
-            use_heuristic = false;
-
-            char buf[max_map_schema_length];
+        // Create vector of search strings
+        vector<string> search_strings;
+        if (command_line_args.get_search_strings_file_path().empty()) {
+            search_strings.push_back(command_line_args.get_search_string());
+        } else {
             FileReader file_reader;
-            file_reader.try_open(schema_file_path);
-
-            size_t num_bytes_read;
-            file_reader.read(buf, max_map_schema_length, num_bytes_read);
-            if (num_bytes_read < max_map_schema_length) {
-                auto forward_lexer_map_it = forward_lexer_map.find(buf);
-                auto reverse_lexer_map_it = reverse_lexer_map.find(buf);
-                // if there is a chance there might be a difference make a new lexer as it's pretty
-                // fast to create
-                if (forward_lexer_map_it == forward_lexer_map.end()) {
-                    // Create forward lexer
-                    auto insert_result
-                            = forward_lexer_map.emplace(buf, log_surgeon::lexers::ByteLexer());
-                    forward_lexer_ptr = &insert_result.first->second;
-                    load_lexer_from_file(schema_file_path, false, *forward_lexer_ptr);
-
-                    // Create reverse lexer
-                    insert_result
-                            = reverse_lexer_map.emplace(buf, log_surgeon::lexers::ByteLexer());
-                    reverse_lexer_ptr = &insert_result.first->second;
-                    load_lexer_from_file(schema_file_path, true, *reverse_lexer_ptr);
-                } else {
-                    // load the lexers if they already exist
-                    forward_lexer_ptr = &forward_lexer_map_it->second;
-                    reverse_lexer_ptr = &reverse_lexer_map_it->second;
+            file_reader.open(command_line_args.get_search_strings_file_path());
+            string line;
+            while (file_reader.read_to_delimiter('\n', false, false, line)) {
+                if (!line.empty()) {
+                    search_strings.push_back(line);
                 }
-            } else {
-                // Create forward lexer
-                forward_lexer_ptr = &one_time_use_forward_lexer;
-                load_lexer_from_file(schema_file_path, false, one_time_use_forward_lexer);
-
-                // Create reverse lexer
-                reverse_lexer_ptr = &one_time_use_reverse_lexer;
-                load_lexer_from_file(schema_file_path, false, one_time_use_reverse_lexer);
             }
+            file_reader.close();
         }
 
-        // Perform search
-        if (!search(search_strings,
-                    command_line_args,
-                    archive_reader,
-                    *forward_lexer_ptr,
-                    *reverse_lexer_ptr,
-                    use_heuristic))
+        // Validate archives directory
+        struct stat archives_dir_stat = {};
+        auto archives_dir = std::filesystem::path(command_line_args.get_archives_dir());
+        if (0 != stat(archives_dir.c_str(), &archives_dir_stat)) {
+            SPDLOG_ERROR(
+                    "'{}' does not exist or cannot be accessed - {}.",
+                    archives_dir.c_str(),
+                    strerror(errno)
+            );
+            return -1;
+        } else if (S_ISDIR(archives_dir_stat.st_mode) == false) {
+            SPDLOG_ERROR("'{}' is not a directory.", archives_dir.c_str());
+            return -1;
+        }
+
+        auto const& global_metadata_db_config = command_line_args.get_metadata_db_config();
+        std::unique_ptr<GlobalMetadataDB> global_metadata_db;
+        switch (global_metadata_db_config.get_metadata_db_type()) {
+            case GlobalMetadataDBConfig::MetadataDBType::SQLite: {
+                auto global_metadata_db_path = archives_dir / streaming_archive::cMetadataDBFileName;
+                global_metadata_db
+                        = std::make_unique<GlobalSQLiteMetadataDB>(global_metadata_db_path.string());
+                break;
+            }
+            case GlobalMetadataDBConfig::MetadataDBType::MySQL:
+                global_metadata_db = std::make_unique<GlobalMySQLMetadataDB>(
+                        global_metadata_db_config.get_metadata_db_host(),
+                        global_metadata_db_config.get_metadata_db_port(),
+                        global_metadata_db_config.get_metadata_db_username(),
+                        global_metadata_db_config.get_metadata_db_password(),
+                        global_metadata_db_config.get_metadata_db_name(),
+                        global_metadata_db_config.get_metadata_table_prefix()
+                );
+                break;
+        }
+        global_metadata_db->open();
+
+        // TODO: if performance is too slow, can make this more efficient by only diffing files with the
+        // same checksum
+        uint32_t const max_map_schema_length = 100'000;
+        std::map<std::string, log_surgeon::lexers::ByteLexer> forward_lexer_map;
+        std::map<std::string, log_surgeon::lexers::ByteLexer> reverse_lexer_map;
+        log_surgeon::lexers::ByteLexer one_time_use_forward_lexer;
+        log_surgeon::lexers::ByteLexer one_time_use_reverse_lexer;
+        log_surgeon::lexers::ByteLexer* forward_lexer_ptr;
+        log_surgeon::lexers::ByteLexer* reverse_lexer_ptr;
+
+        string archive_id;
+        Archive archive_reader;
+
+        int controller_socket_fd = connect_to_search_controller(command_line_args.get_search_controller_host(),
+                                                                command_line_args.get_search_controller_port());
+        if (-1 == controller_socket_fd)
         {
             return -1;
         }
-        archive_reader.close();
+        ControllerMonitoringThread controller_monitoring_thread(controller_socket_fd);
+        controller_monitoring_thread.start();
+
+        for (auto archive_ix = std::unique_ptr<GlobalMetadataDB::ArchiveIterator>(get_archive_iterator(
+                    *global_metadata_db,
+                    command_line_args.get_file_path(),
+                    command_line_args.get_search_begin_ts(),
+                    command_line_args.get_search_end_ts()
+            ));
+            archive_ix->contains_element();
+            archive_ix->get_next())
+        {
+            archive_ix->get_id(archive_id);
+            auto archive_path = archives_dir / archive_id;
+
+            if (false == std::filesystem::exists(archive_path)) {
+                SPDLOG_WARN(
+                        "Archive {} does not exist in '{}'.",
+                        archive_id,
+                        command_line_args.get_archives_dir()
+                );
+                continue;
+            }
+
+            // Open archive
+            if (!open_archive(archive_path.string(), archive_reader)) {
+                return -1;
+            }
+
+            // Generate lexer if schema file exists
+            auto schema_file_path = archive_path / streaming_archive::cSchemaFileName;
+            bool use_heuristic = true;
+            if (std::filesystem::exists(schema_file_path)) {
+                use_heuristic = false;
+
+                char buf[max_map_schema_length];
+                FileReader file_reader;
+                file_reader.try_open(schema_file_path);
+
+                size_t num_bytes_read;
+                file_reader.read(buf, max_map_schema_length, num_bytes_read);
+                if (num_bytes_read < max_map_schema_length) {
+                    auto forward_lexer_map_it = forward_lexer_map.find(buf);
+                    auto reverse_lexer_map_it = reverse_lexer_map.find(buf);
+                    // if there is a chance there might be a difference make a new lexer as it's pretty
+                    // fast to create
+                    if (forward_lexer_map_it == forward_lexer_map.end()) {
+                        // Create forward lexer
+                        auto insert_result
+                                = forward_lexer_map.emplace(buf, log_surgeon::lexers::ByteLexer());
+                        forward_lexer_ptr = &insert_result.first->second;
+                        load_lexer_from_file(schema_file_path, false, *forward_lexer_ptr);
+
+                        // Create reverse lexer
+                        insert_result
+                                = reverse_lexer_map.emplace(buf, log_surgeon::lexers::ByteLexer());
+                        reverse_lexer_ptr = &insert_result.first->second;
+                        load_lexer_from_file(schema_file_path, true, *reverse_lexer_ptr);
+                    } else {
+                        // load the lexers if they already exist
+                        forward_lexer_ptr = &forward_lexer_map_it->second;
+                        reverse_lexer_ptr = &reverse_lexer_map_it->second;
+                    }
+                } else {
+                    // Create forward lexer
+                    forward_lexer_ptr = &one_time_use_forward_lexer;
+                    load_lexer_from_file(schema_file_path, false, one_time_use_forward_lexer);
+
+                    // Create reverse lexer
+                    reverse_lexer_ptr = &one_time_use_reverse_lexer;
+                    load_lexer_from_file(schema_file_path, false, one_time_use_reverse_lexer);
+                }
+            }
+
+            // Perform search
+            if (!search(search_strings,
+                        command_line_args,
+                        archive_reader,
+                        *forward_lexer_ptr,
+                        *reverse_lexer_ptr,
+                        use_heuristic,
+                        controller_monitoring_thread.get_query_cancelled(), 
+                        controller_socket_fd))
+            {
+                return -1;
+            }
+            archive_reader.close();
+        }
+
+        global_metadata_db->close();
+
+        Profiler::stop_continuous_measurement<Profiler::ContinuousMeasurementIndex::Search>();
+        LOG_CONTINUOUS_MEASUREMENT(Profiler::ContinuousMeasurementIndex::Search)
+
+        auto shutdown_result = shutdown(controller_socket_fd, SHUT_RDWR);
+        if (0 != shutdown_result)
+        {
+            if (ENOTCONN != shutdown_result)
+            {
+                SPDLOG_ERROR("Failed to shutdown socket, error={}", shutdown_result);
+            } // else connection already disconnected, so nothing to do
+        }
+
+        try
+        {
+            controller_monitoring_thread.join();
+        }
+        catch (TraceableException &e)
+        {
+            auto error_code = e.get_error_code();
+            if (ErrorCode_errno == error_code)
+            {
+                SPDLOG_ERROR("Failed to join with controller monitoring thread: {}:{} {}, errno={}",
+                             e.get_filename(), e.get_line_number(), e.what(), errno);
+            }
+            else
+            {
+                SPDLOG_ERROR("Failed to join with controller monitoring thread: {}:{} {}, "
+                             "error_code={}",
+                             e.get_filename(), e.get_line_number(), e.what(),
+                             error_code);
+            }
+            return -1;
+        }
+
+        return 0;
     }
-
-    global_metadata_db->close();
-
-    Profiler::stop_continuous_measurement<Profiler::ContinuousMeasurementIndex::Search>();
-    LOG_CONTINUOUS_MEASUREMENT(Profiler::ContinuousMeasurementIndex::Search)
-
-    return 0;
+    catch (std::exception &e){
+        std::cout << e.what();
+        // NOTE: We can't log an exception if the logger couldn't be constructed
+        return -1;
+    }
 }

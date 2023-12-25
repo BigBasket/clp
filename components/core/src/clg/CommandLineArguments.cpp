@@ -123,9 +123,15 @@ CommandLineArguments::parse_arguments(int argc, char const* argv[]) {
     )(
             "file-path",
             po::value<string>(&m_file_path)
+    )(      "search-controller-host", 
+            po::value<string>(&m_search_controller_host)
+    )(      "search-controller-port", 
+            po::value<string>(&m_search_controller_port)
     );
     // clang-format on
     po::positional_options_description positional_options_description;
+    positional_options_description.add("search-controller-host", 1);
+    positional_options_description.add("search-controller-port", 1);
     positional_options_description.add("archives-dir", 1);
     positional_options_description.add("wildcard-string", 1);
     positional_options_description.add("file-path", 1);

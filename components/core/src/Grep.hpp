@@ -116,7 +116,9 @@ public:
             streaming_archive::reader::Archive& archive,
             streaming_archive::reader::File& compressed_file,
             OutputFunc output_func,
-            void* output_func_arg
+            void* output_func_arg,
+            const std::atomic_bool& query_cancelled, 
+            int controller_socket_fd
     );
     static bool search_and_decompress(
             Query const& query,

@@ -3,6 +3,10 @@
 #include "Defs.h"
 #include "TimestampPattern.hpp"
 
+#include <spdlog/sinks/stdout_sinks.h>
+#include <spdlog/spdlog.h>
+
+
 constexpr char cLineDelimiter = '\n';
 
 bool MessageParser::parse_next_message(
@@ -99,6 +103,20 @@ bool MessageParser::parse_line(ParsedMessage& message) {
     epochtime_t timestamp = 0;
     size_t timestamp_begin_pos;
     size_t timestamp_end_pos;
+
+    try {
+        boost::property_tree::ptree pt;
+        std::stringstream ss(m_line);
+        boost::property_tree::read_json(ss, pt);
+        std::string log_time = pt.get<std::string>("log_time");
+        pt.erase("log_time");
+        std::ostringstream oss;
+        boost::property_tree::json_parser::write_json(oss, pt, false);
+        m_line = log_time + " " + oss.str();
+    } catch (const std::exception &e) {
+        SPDLOG_ERROR(e.what());
+        throw OperationFailed(ErrorCode_Failure, __FILENAME__, __LINE__);
+    }
     if (nullptr == timestamp_pattern
         || false
                    == timestamp_pattern->parse_timestamp(
