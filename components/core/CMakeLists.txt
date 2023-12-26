@@ -66,7 +66,7 @@ message(STATUS "Building using ${CLP_LIBS_STRING} libraries")
 # Link against c++fs if required by the compiler being used
 set(STD_FS_LIBS "")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS "10.0.0")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.1.0")
         set(STD_FS_LIBS "stdc++fs")
     endif ()
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -342,7 +342,7 @@ target_link_libraries(clp
         ZStd::ZStd
         )
 target_compile_features(clp
-        PRIVATE cxx_std_17
+        PRIVATE cxx_std_20
         )
 
 # Generate C++ KQL Parser
@@ -496,7 +496,7 @@ target_link_libraries(clg
         ZStd::ZStd
         )
 target_compile_features(clg
-        PRIVATE cxx_std_17
+        PRIVATE cxx_std_20
         )
 
 set(SOURCE_FILES_clo
@@ -629,7 +629,7 @@ target_link_libraries(clo
         ZStd::ZStd
         )
 target_compile_features(clo
-        PRIVATE cxx_std_17
+        PRIVATE cxx_std_20
         )
 
 set(SOURCE_FILES_unitTest
@@ -847,7 +847,7 @@ target_link_libraries(unitTest
         ZStd::ZStd
         )
 target_compile_features(unitTest
-        PRIVATE cxx_std_17
+        PRIVATE cxx_std_20
         )
 
 include(cmake/utils.cmake)
