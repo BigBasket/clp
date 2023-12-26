@@ -824,17 +824,17 @@ set(SOURCE_FILES_unitTest
         tests/test-Utils.cpp
         )
 add_executable(unitTest ${SOURCE_FILES_unitTest})
-target_include_directories(unitTest
-        PRIVATE
-        Boost::filesystem Boost::iostreams Boost::program_options
-        fmt::fmt
-        LibArchive::LibArchive
-        MariaDBClient::MariaDBClient
-        spdlog::spdlog
-        ${CMAKE_SOURCE_DIR}/submodules
-        yaml-cpp::yaml-cpp
-        ZStd::ZStd
-        )
+# target_include_directories(unitTest
+#         PRIVATE
+#         Boost::filesystem Boost::iostreams Boost::program_options
+#         fmt::fmt
+#         LibArchive::LibArchive
+#         MariaDBClient::MariaDBClient
+#         spdlog::spdlog
+#         ${CMAKE_SOURCE_DIR}/submodules
+#         yaml-cpp::yaml-cpp
+#         ZStd::ZStd
+#         )
 target_link_libraries(unitTest
         PRIVATE
         Boost::filesystem Boost::iostreams Boost::program_options
