@@ -66,7 +66,7 @@ message(STATUS "Building using ${CLP_LIBS_STRING} libraries")
 # Link against c++fs if required by the compiler being used
 set(STD_FS_LIBS "")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.1.0")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_LESS "10.0.0")
         set(STD_FS_LIBS "stdc++fs")
     endif ()
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
