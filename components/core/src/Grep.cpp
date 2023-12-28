@@ -898,6 +898,7 @@ size_t Grep::search_and_output(
         OutputFunc output_func,
         void* output_func_arg
 ) {
+    SPDLOG_INFO("search and output");
     size_t num_matches = 0;
 
     Message compressed_msg;
