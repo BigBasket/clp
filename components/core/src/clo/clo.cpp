@@ -177,7 +177,7 @@ static SearchFilesResult search_files(
         std::atomic_bool const& query_cancelled,
         int controller_socket_fd
 ) {
-    SPDLOG_TRACE("search_files start");
+    SPDLOG_INFO("search_files start");
     SearchFilesResult result = SearchFilesResult::Success;
 
     File compressed_file;
@@ -361,7 +361,7 @@ int main(int argc, char const* argv[]) {
         return -1;
     }
 
-    SPDLOG_TRACE("clo start");
+    SPDLOG_INFO("clo start");
 
     auto const archive_path = boost::filesystem::path(command_line_args.get_archive_path());
 

@@ -958,7 +958,7 @@ bool Grep::search_and_decompress(
         Message& compressed_msg,
         string& decompressed_msg
 ) {
-    SPDLOG_TRACE("search and decompress");
+    SPDLOG_INFO("search and decompress");
     string const& orig_file_path = compressed_file.get_orig_path();
 
     bool matched = false;
