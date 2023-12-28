@@ -362,6 +362,11 @@ static size_t search_files(
         if (open_compressed_file(file_metadata_ix, archive, compressed_file)) {
             Grep::calculate_sub_queries_relevant_to_file(compressed_file, queries);
 
+            SPDLOG_INFO(compressed_file.get_orig_path());
+            for (auto const& query : queries) {
+                SPDLOG_INFO(query.get_search_string());
+            }
+
             for (auto const& query : queries) {
                 archive.reset_file_indices(compressed_file);
                 num_matches += Grep::search_and_output(

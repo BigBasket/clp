@@ -177,7 +177,6 @@ static SearchFilesResult search_files(
         std::atomic_bool const& query_cancelled,
         int controller_socket_fd
 ) {
-    SPDLOG_INFO("search_files start");
     SearchFilesResult result = SearchFilesResult::Success;
 
     File compressed_file;
@@ -200,6 +199,8 @@ static SearchFilesResult search_files(
         }
 
         query.make_sub_queries_relevant_to_segment(compressed_file.get_segment_id());
+        SPDLOG_INFO(compressed_file.get_orig_path());
+        SPDLOG_INFO(query.get_search_string());
         while (false == query_cancelled
                && Grep::search_and_decompress(
                        query,
@@ -361,7 +362,6 @@ int main(int argc, char const* argv[]) {
         return -1;
     }
 
-    SPDLOG_INFO("clo start");
 
     auto const archive_path = boost::filesystem::path(command_line_args.get_archive_path());
 
