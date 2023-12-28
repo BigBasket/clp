@@ -154,7 +154,7 @@ static ErrorCode send_result(
     boost::property_tree::ptree pt;
     std::stringstream ss(decompressed_msg);
     boost::property_tree::read_json(ss, pt);
-    int64_t datetime = compressed_msg.get_ts_in_milli()/1000
+    int64_t datetime = compressed_msg.get_ts_in_milli()/1000;
     pt.put("log_time", ctime(&datetime));
     std::ostringstream oss;
     boost::property_tree::json_parser::write_json(oss, pt, false);
