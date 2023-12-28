@@ -6,6 +6,9 @@
 
 #include <boost/filesystem.hpp>
 #include <spdlog/sinks/stdout_sinks.h>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/json_parser.hpp>
+#include<time.h>
 
 #include "../Defs.h"
 #include "../Grep.hpp"
@@ -148,12 +151,17 @@ static ErrorCode send_result(
         string const& decompressed_msg,
         int controller_socket_fd
 ) {
-    msgpack::type::tuple<std::string, epochtime_t, std::string> src(
-            orig_file_path,
-            compressed_msg.get_ts_in_milli(),
-            decompressed_msg
-    );
+    boost::property_tree::ptree pt;
+    std::stringstream ss(decompressed_msg);
+    boost::property_tree::read_json(ss, pt);
+    int64_t datetime = compressed_msg.get_ts_in_milli()/1000
+    pt.put("log_time", ctime(&datetime));
+    std::ostringstream oss;
+    boost::property_tree::json_parser::write_json(oss, pt, false);
     msgpack::sbuffer m;
+    msgpack::type::tuple<std::string, epochtime_t, std::string> src(
+            oss.str()
+    );
     msgpack::pack(m, src);
     return networking::try_send(controller_socket_fd, m.data(), m.size());
 }

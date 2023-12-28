@@ -99,6 +99,20 @@ bool MessageParser::parse_line(ParsedMessage& message) {
     epochtime_t timestamp = 0;
     size_t timestamp_begin_pos;
     size_t timestamp_end_pos;
+
+    try {
+        boost::property_tree::ptree pt;
+        std::stringstream ss(m_line);
+        boost::property_tree::read_json(ss, pt);
+        std::string dateTime = pt.get<std::string>("log_time");
+        pt.erase("log_time");
+        std::ostringstream ss;
+        boost::property_tree::json_parser::write_json(ss, pt, false);
+        m_line = dateTime + " " + ss.str();
+    } catch (const std::exception &e) {
+        throw OperationFailed(ErrorCode_Failure, __FILENAME__, __LINE__);
+    }
+
     if (nullptr == timestamp_pattern
         || false
                    == timestamp_pattern->parse_timestamp(
