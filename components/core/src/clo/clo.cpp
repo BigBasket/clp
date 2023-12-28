@@ -177,7 +177,7 @@ static SearchFilesResult search_files(
         std::atomic_bool const& query_cancelled,
         int controller_socket_fd
 ) {
-    SPDLOG_TRACE("search_files start")
+    SPDLOG_TRACE("search_files start");
     SearchFilesResult result = SearchFilesResult::Success;
 
     File compressed_file;
@@ -331,7 +331,7 @@ int main(int argc, char const* argv[]) {
     // Program-wide initialization
     try {
         // auto stderr_logger = spdlog::stderr_logger_st("stderr");
-        spdlog::set_level(SPDLOG_LEVEL_TRACE)
+        spdlog::set_level(0);
         // spdlog::set_default_logger(stderr_logger);
         spdlog::set_pattern("%Y-%m-%d %H:%M:%S,%e [%l] %v");
     } catch (std::exception& e) {
