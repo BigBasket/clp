@@ -361,6 +361,8 @@ int main(int argc, char const* argv[]) {
         return -1;
     }
 
+    SPDLOG_TRACE("clo start");
+
     auto const archive_path = boost::filesystem::path(command_line_args.get_archive_path());
 
     ControllerMonitoringThread controller_monitoring_thread(controller_socket_fd);
