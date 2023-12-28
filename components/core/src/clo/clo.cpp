@@ -159,7 +159,7 @@ static ErrorCode send_result(
     std::ostringstream oss;
     boost::property_tree::json_parser::write_json(oss, pt, false);
     msgpack::sbuffer m;
-    msgpack::type::tuple<std::string, epochtime_t, std::string> src(
+    msgpack::type::tuple<std::string> src(
             oss.str()
     );
     msgpack::pack(m, src);
