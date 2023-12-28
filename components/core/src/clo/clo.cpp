@@ -152,8 +152,9 @@ static ErrorCode send_result(
         int controller_socket_fd
 ) {
     boost::property_tree::ptree pt;
-    printf("%s", decompressed_msg.c_str());
-    std::stringstream ss(decompressed_msg);
+    size_t spacePos = decompressed_msg.find(" ");
+    std::string decompressed_msg_str = decompressed_msg.substr(spacePos + 1);
+    std::stringstream ss(decompressed_msg_str);
     boost::property_tree::read_json(ss, pt);
     int64_t datetime = compressed_msg.get_ts_in_milli()/1000;
     pt.put("log_time", ctime(&datetime));
