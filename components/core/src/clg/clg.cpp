@@ -251,7 +251,7 @@ static bool search(
             SPDLOG_INFO("queries picked for search");
             size_t num_matches;
             if (is_superseding_query) {
-                SPDLOG_INFO("superseding query")
+                SPDLOG_INFO("superseding query");
                 auto file_metadata_ix = archive.get_file_iterator(
                         search_begin_ts,
                         search_end_ts,
@@ -265,7 +265,7 @@ static bool search(
                         *file_metadata_ix
                 );
             } else {
-                SPDLOG_INFO("NOT A superseding query")
+                SPDLOG_INFO("NOT A superseding query");
                 auto file_metadata_ix_ptr = archive.get_file_iterator(
                         search_begin_ts,
                         search_end_ts,
@@ -581,7 +581,7 @@ int main(int argc, char const* argv[]) {
         auto schema_file_path = archive_path / streaming_archive::cSchemaFileName;
         bool use_heuristic = true;
         if (std::filesystem::exists(schema_file_path)) {
-            SPDLOG_INFO("schema file used")
+            SPDLOG_INFO("schema file used");
             use_heuristic = false;
 
             char buf[max_map_schema_length];

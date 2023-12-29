@@ -307,7 +307,7 @@ static bool search_archive(
         query = command_line_args.get_search_string();
     }
     // Search segments
-    if is_superseding_query {
+    if (true == is_superseding_query) {
         auto file_metadata_ix = archive.get_file_iterator(
                 search_begin_ts,
                 search_end_ts,
