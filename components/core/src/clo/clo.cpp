@@ -238,6 +238,7 @@ static bool search_archive(
         std::atomic_bool const& query_cancelled,
         int controller_socket_fd
 ) {
+    SPDLOG_INFO("search archive");
     if (false == boost::filesystem::exists(archive_path)) {
         SPDLOG_ERROR("Archive '{}' does not exist.", archive_path.c_str());
         return false;
@@ -257,6 +258,7 @@ static bool search_archive(
     unique_ptr<log_surgeon::lexers::ByteLexer> forward_lexer, reverse_lexer;
     bool use_heuristic = true;
     if (boost::filesystem::exists(schema_file_path)) {
+        SPDLOG_INFO("using schema file");
         use_heuristic = false;
         // Create forward lexer
         forward_lexer.reset(new log_surgeon::lexers::ByteLexer());
@@ -287,7 +289,7 @@ static bool search_archive(
     if (false == query_processing_result.has_value()) {
         return true;
     }
-
+    SPDLOG_INFO("result acquired from process raw query");
     auto& query = query_processing_result.value();
     // Get all segments potentially containing query results
     std::set<segment_id_t> ids_of_segments_to_search;
@@ -299,29 +301,49 @@ static bool search_archive(
         );
     }
 
+    bool is_superseding_query = false;
+    if (false == query.contains_sub_queries()) {
+        is_superseding_query = true;
+        query = command_line_args.get_search_string();
+    }
     // Search segments
-    auto file_metadata_ix_ptr = archive_reader.get_file_iterator(
-            search_begin_ts,
-            search_end_ts,
-            command_line_args.get_file_path(),
-            cInvalidSegmentId
-    );
-    auto& file_metadata_ix = *file_metadata_ix_ptr;
-    for (auto segment_id : ids_of_segments_to_search) {
-        file_metadata_ix.set_segment_id(segment_id);
+    if is_superseding_query {
+        auto file_metadata_ix = archive.get_file_iterator(
+                search_begin_ts,
+                search_end_ts,
+                command_line_args.get_file_path()
+        );
         auto result = search_files(
                 query,
                 archive_reader,
-                file_metadata_ix,
+                *file_metadata_ix,
                 query_cancelled,
                 controller_socket_fd
         );
-        if (SearchFilesResult::ResultSendFailure == result) {
-            // Stop search now since results aren't reaching the controller
-            break;
+    }else{
+        auto file_metadata_ix_ptr = archive_reader.get_file_iterator(
+                search_begin_ts,
+                search_end_ts,
+                command_line_args.get_file_path(),
+                cInvalidSegmentId
+        );
+        auto& file_metadata_ix = *file_metadata_ix_ptr;
+        for (auto segment_id : ids_of_segments_to_search) {
+            file_metadata_ix.set_segment_id(segment_id);
+            auto result = search_files(
+                    query,
+                    archive_reader,
+                    file_metadata_ix,
+                    query_cancelled,
+                    controller_socket_fd
+            );
+            if (SearchFilesResult::ResultSendFailure == result) {
+                // Stop search now since results aren't reaching the controller
+                break;
+            }
         }
+        file_metadata_ix_ptr.reset(nullptr);
     }
-    file_metadata_ix_ptr.reset(nullptr);
 
     archive_reader.close();
 
@@ -353,7 +375,7 @@ int main(int argc, char const* argv[]) {
             // Continue processing
             break;
     }
-
+    SPDLOG_INFO("main");
     int controller_socket_fd = connect_to_search_controller(
             command_line_args.get_search_controller_host(),
             command_line_args.get_search_controller_port()
@@ -369,6 +391,7 @@ int main(int argc, char const* argv[]) {
     controller_monitoring_thread.start();
 
     int return_value = 0;
+    SPDLOG_INFO("try on search archive");
     try {
         if (false
             == search_archive(
