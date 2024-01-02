@@ -9,6 +9,7 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 #include<time.h>
+#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
 
 #include "../Defs.h"
 #include "../Grep.hpp"
@@ -19,8 +20,6 @@
 #include "../Utils.hpp"
 #include "CommandLineArguments.hpp"
 #include "ControllerMonitoringThread.hpp"
-
-#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
 
 using clo::CommandLineArguments;
 using std::cerr;
@@ -153,7 +152,7 @@ static ErrorCode send_result(
         string const& decompressed_msg,
         int controller_socket_fd
 ) {
-    boost::property_tree::ptree pt;
+     boost::property_tree::ptree pt;
     size_t spacePos = decompressed_msg.find(" ");
     std::string decompressed_msg_str = decompressed_msg.substr(spacePos + 1);
     std::stringstream ss(decompressed_msg_str);
@@ -285,6 +284,7 @@ static bool search_archive(
     if (false == query_processing_result.has_value()) {
         return true;
     }
+
     auto& query = query_processing_result.value();
     // Get all segments potentially containing query results
     std::set<segment_id_t> ids_of_segments_to_search;
@@ -297,16 +297,28 @@ static bool search_archive(
     }
 
     // Search segments
-    auto result = search_files(
-            query,
-            archive_reader,
-            file_metadata_ix,
-            query_cancelled,
-            controller_socket_fd
+    auto file_metadata_ix_ptr = archive_reader.get_file_iterator(
+            search_begin_ts,
+            search_end_ts,
+            command_line_args.get_file_path(),
+            cInvalidSegmentId
     );
+    auto& file_metadata_ix = *file_metadata_ix_ptr;
+    for (auto segment_id : ids_of_segments_to_search) {
+        file_metadata_ix.set_segment_id(segment_id);
+        auto result = search_files(
+                query,
+                archive_reader,
+                file_metadata_ix,
+                query_cancelled,
+                controller_socket_fd
+        );
+        if (SearchFilesResult::ResultSendFailure == result) {
+            // Stop search now since results aren't reaching the controller
+            break;
         }
-        // file_metadata_ix_ptr.reset(nullptr);
     }
+    file_metadata_ix_ptr.reset(nullptr);
 
     archive_reader.close();
 
@@ -316,9 +328,8 @@ static bool search_archive(
 int main(int argc, char const* argv[]) {
     // Program-wide initialization
     try {
-        // auto stderr_logger = spdlog::stderr_logger_st("stderr");
-        spdlog::set_level(spdlog::level::trace);
-        // spdlog::set_default_logger(stderr_logger);
+        auto stderr_logger = spdlog::stderr_logger_st("stderr");
+        spdlog::set_default_logger(stderr_logger);
         spdlog::set_pattern("%Y-%m-%d %H:%M:%S,%e [%l] %v");
     } catch (std::exception& e) {
         // NOTE: We can't log an exception if the logger couldn't be constructed
@@ -338,6 +349,7 @@ int main(int argc, char const* argv[]) {
             // Continue processing
             break;
     }
+
     int controller_socket_fd = connect_to_search_controller(
             command_line_args.get_search_controller_host(),
             command_line_args.get_search_controller_port()
@@ -345,7 +357,6 @@ int main(int argc, char const* argv[]) {
     if (-1 == controller_socket_fd) {
         return -1;
     }
-
 
     auto const archive_path = boost::filesystem::path(command_line_args.get_archive_path());
 
