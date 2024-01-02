@@ -296,48 +296,16 @@ static bool search_archive(
         );
     }
 
-    bool is_superseding_query = false;
-    if (false == query.contains_sub_queries()) {
-        is_superseding_query = true;
-        query = command_line_args.get_search_string();
-    }
     // Search segments
-    if (true == is_superseding_query) {
-        auto file_metadata_ix = archive_reader.get_file_iterator(
-                search_begin_ts,
-                search_end_ts,
-                command_line_args.get_file_path()
-        );
-        auto result = search_files(
-                query,
-                archive_reader,
-                *file_metadata_ix,
-                query_cancelled,
-                controller_socket_fd
-        );
-    }else{
-        auto file_metadata_ix_ptr = archive_reader.get_file_iterator(
-                search_begin_ts,
-                search_end_ts,
-                command_line_args.get_file_path(),
-                cInvalidSegmentId
-        );
-        auto& file_metadata_ix = *file_metadata_ix_ptr;
-        for (auto segment_id : ids_of_segments_to_search) {
-            file_metadata_ix.set_segment_id(segment_id);
-            auto result = search_files(
-                    query,
-                    archive_reader,
-                    file_metadata_ix,
-                    query_cancelled,
-                    controller_socket_fd
-            );
-            if (SearchFilesResult::ResultSendFailure == result) {
-                // Stop search now since results aren't reaching the controller
-                break;
-            }
+    auto result = search_files(
+            query,
+            archive_reader,
+            file_metadata_ix,
+            query_cancelled,
+            controller_socket_fd
+    );
         }
-        file_metadata_ix_ptr.reset(nullptr);
+        // file_metadata_ix_ptr.reset(nullptr);
     }
 
     archive_reader.close();
