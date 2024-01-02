@@ -196,7 +196,6 @@ static bool search(
         log_surgeon::lexers::ByteLexer& reverse_lexer,
         bool use_heuristic
 ) {
-    SPDLOG_INFO("search");
     ErrorCode error_code;
     auto search_begin_ts = command_line_args.get_search_begin_ts();
     auto search_end_ts = command_line_args.get_search_end_ts();
@@ -218,12 +217,10 @@ static bool search(
                     use_heuristic
             );
             if (query_processing_result.has_value()) {
-                SPDLOG_INFO("result acquired from process raw query");
                 auto& query = query_processing_result.value();
                 no_queries_match = false;
 
                 if (false == query.contains_sub_queries()) {
-                    SPDLOG_INFO("no sub queries");
                     // Search string supersedes all other possible search strings
                     is_superseding_query = true;
                     // Remove existing queries since they are superseded by this one
@@ -233,7 +230,6 @@ static bool search(
                     // All other search strings will be superseded by this one, so break
                     break;
                 }
-                SPDLOG_INFO("sub queries found");
                 queries.push_back(query);
 
                 // Add query's matching segments to segments to search
@@ -248,16 +244,13 @@ static bool search(
         }
 
         if (!no_queries_match) {
-            SPDLOG_INFO("queries picked for search");
             size_t num_matches;
             if (is_superseding_query) {
-                SPDLOG_INFO("superseding query");
                 auto file_metadata_ix = archive.get_file_iterator(
                         search_begin_ts,
                         search_end_ts,
                         command_line_args.get_file_path()
                 );
-                SPDLOG_INFO("search files after superseding query");
                 num_matches = search_files(
                         queries,
                         command_line_args.get_output_method(),
@@ -265,7 +258,6 @@ static bool search(
                         *file_metadata_ix
                 );
             } else {
-                SPDLOG_INFO("NOT A superseding query");
                 auto file_metadata_ix_ptr = archive.get_file_iterator(
                         search_begin_ts,
                         search_end_ts,
@@ -280,7 +272,6 @@ static bool search(
                         file_metadata_ix
                 );
                 for (auto segment_id : ids_of_segments_to_search) {
-                    SPDLOG_INFO("looping through each segment of the query");
                     file_metadata_ix.set_segment_id(segment_id);
                     num_matches += search_files(
                             queries,
@@ -291,7 +282,6 @@ static bool search(
                 }
             }
             SPDLOG_DEBUG("# matches found: {}", num_matches);
-            SPDLOG_INFO("# matches found: {}", num_matches);
         }
     } catch (TraceableException& e) {
         error_code = e.get_error_code();
@@ -346,7 +336,6 @@ static size_t search_files(
         Archive& archive,
         MetadataDB::FileIterator& file_metadata_ix
 ) {
-    SPDLOG_INFO("start search files");
     size_t num_matches = 0;
 
     File compressed_file;
@@ -369,12 +358,10 @@ static size_t search_files(
 
     // Run all queries on each file
     for (; file_metadata_ix.has_next(); file_metadata_ix.next()) {
-        SPDLOG_INFO("looping over files");
         if (open_compressed_file(file_metadata_ix, archive, compressed_file)) {
             Grep::calculate_sub_queries_relevant_to_file(compressed_file, queries);
 
             for (auto const& query : queries) {
-                SPDLOG_INFO("processing each query over each file");
                 archive.reset_file_indices(compressed_file);
                 num_matches += Grep::search_and_output(
                         query,
@@ -485,7 +472,6 @@ int main(int argc, char const* argv[]) {
     }
 
     Profiler::start_continuous_measurement<Profiler::ContinuousMeasurementIndex::Search>();
-    SPDLOG_INFO("main");
     // Create vector of search strings
     vector<string> search_strings;
     if (command_line_args.get_search_strings_file_path().empty()) {
@@ -581,7 +567,6 @@ int main(int argc, char const* argv[]) {
         auto schema_file_path = archive_path / streaming_archive::cSchemaFileName;
         bool use_heuristic = true;
         if (std::filesystem::exists(schema_file_path)) {
-            SPDLOG_INFO("schema file used");
             use_heuristic = false;
 
             char buf[max_map_schema_length];
@@ -635,7 +620,6 @@ int main(int argc, char const* argv[]) {
         }
         archive_reader.close();
     }
-    SPDLOG_INFO("main done");
     global_metadata_db->close();
 
     Profiler::stop_continuous_measurement<Profiler::ContinuousMeasurementIndex::Search>();

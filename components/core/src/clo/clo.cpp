@@ -199,8 +199,6 @@ static SearchFilesResult search_files(
         }
 
         query.make_sub_queries_relevant_to_segment(compressed_file.get_segment_id());
-        SPDLOG_INFO(compressed_file.get_orig_path());
-        SPDLOG_INFO(query.get_search_string());
         while (false == query_cancelled
                && Grep::search_and_decompress(
                        query,
@@ -238,7 +236,6 @@ static bool search_archive(
         std::atomic_bool const& query_cancelled,
         int controller_socket_fd
 ) {
-    SPDLOG_INFO("search archive");
     if (false == boost::filesystem::exists(archive_path)) {
         SPDLOG_ERROR("Archive '{}' does not exist.", archive_path.c_str());
         return false;
@@ -258,7 +255,6 @@ static bool search_archive(
     unique_ptr<log_surgeon::lexers::ByteLexer> forward_lexer, reverse_lexer;
     bool use_heuristic = true;
     if (boost::filesystem::exists(schema_file_path)) {
-        SPDLOG_INFO("using schema file");
         use_heuristic = false;
         // Create forward lexer
         forward_lexer.reset(new log_surgeon::lexers::ByteLexer());
@@ -289,7 +285,6 @@ static bool search_archive(
     if (false == query_processing_result.has_value()) {
         return true;
     }
-    SPDLOG_INFO("result acquired from process raw query");
     auto& query = query_processing_result.value();
     // Get all segments potentially containing query results
     std::set<segment_id_t> ids_of_segments_to_search;
@@ -308,7 +303,7 @@ static bool search_archive(
     }
     // Search segments
     if (true == is_superseding_query) {
-        auto file_metadata_ix = archive.get_file_iterator(
+        auto file_metadata_ix = archive_reader.get_file_iterator(
                 search_begin_ts,
                 search_end_ts,
                 command_line_args.get_file_path()
@@ -375,7 +370,6 @@ int main(int argc, char const* argv[]) {
             // Continue processing
             break;
     }
-    SPDLOG_INFO("main");
     int controller_socket_fd = connect_to_search_controller(
             command_line_args.get_search_controller_host(),
             command_line_args.get_search_controller_port()
@@ -391,7 +385,6 @@ int main(int argc, char const* argv[]) {
     controller_monitoring_thread.start();
 
     int return_value = 0;
-    SPDLOG_INFO("try on search archive");
     try {
         if (false
             == search_archive(

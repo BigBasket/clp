@@ -497,7 +497,6 @@ std::optional<Query> Grep::process_raw_query(
         log_surgeon::lexers::ByteLexer& reverse_lexer,
         bool use_heuristic
 ) {
-    SPDLOG_INFO("process raw query");
     // Add prefix and suffix '*' to make the search a sub-string match
     string processed_search_string = "*";
     processed_search_string += search_string;
@@ -899,7 +898,6 @@ size_t Grep::search_and_output(
         OutputFunc output_func,
         void* output_func_arg
 ) {
-    SPDLOG_INFO("search and output");
     size_t num_matches = 0;
 
     Message compressed_msg;
@@ -960,7 +958,6 @@ bool Grep::search_and_decompress(
         Message& compressed_msg,
         string& decompressed_msg
 ) {
-    // SPDLOG_INFO("search and decompress");
     string const& orig_file_path = compressed_file.get_orig_path();
 
     bool matched = false;
