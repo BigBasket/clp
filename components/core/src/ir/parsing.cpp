@@ -14,7 +14,7 @@ namespace ir {
 bool is_delim(signed char c) {
     return false
            == ('+' == c || ('-' <= c && c <= '.') || ('0' <= c && c <= '9')
-               || ('A' <= c && c <= 'Z') || '\\' == c || '_' == c || ('a' <= c && c <= 'z'));
+               || ('A' <= c && c <= 'Z') || '\\' == c || '_' == c || ('a' <= c && c <= 'z')) || (c == ':');
 }
 
 bool is_variable_placeholder(char c) {
@@ -39,7 +39,7 @@ bool get_bounds_of_next_var(string_view const str, size_t& begin_pos, size_t& en
     if (msg_length <= end_pos) {
         return false;
     }
-
+    bool contains_colon = false;
     while (true) {
         begin_pos = end_pos;
 
@@ -48,6 +48,9 @@ bool get_bounds_of_next_var(string_view const str, size_t& begin_pos, size_t& en
             auto c = str[begin_pos];
             if (false == is_delim(c)) {
                 break;
+            }
+            if (c == ':'){
+                contains_colon = true;
             }
         }
         if (msg_length == begin_pos) {
@@ -77,7 +80,7 @@ bool get_bounds_of_next_var(string_view const str, size_t& begin_pos, size_t& en
         // - it's directly preceded by '=' and contains an alphabet char, or
         // - it could be a multi-digit hex value
         if (contains_decimal_digit
-            || (0 < begin_pos && '=' == str[begin_pos - 1] && contains_alphabet)
+            || (contains_colon && contains_alphabet)
             || could_be_multi_digit_hex_value(variable))
         {
             break;
