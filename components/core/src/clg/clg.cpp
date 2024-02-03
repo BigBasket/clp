@@ -230,6 +230,7 @@ static bool search(
                     // All other search strings will be superseded by this one, so break
                     break;
                 }
+
                 queries.push_back(query);
 
                 // Add query's matching segments to segments to search
@@ -472,6 +473,7 @@ int main(int argc, char const* argv[]) {
     }
 
     Profiler::start_continuous_measurement<Profiler::ContinuousMeasurementIndex::Search>();
+
     // Create vector of search strings
     vector<string> search_strings;
     if (command_line_args.get_search_strings_file_path().empty()) {
@@ -620,6 +622,7 @@ int main(int argc, char const* argv[]) {
         }
         archive_reader.close();
     }
+    
     global_metadata_db->close();
 
     Profiler::stop_continuous_measurement<Profiler::ContinuousMeasurementIndex::Search>();
