@@ -108,7 +108,7 @@ bool MessageParser::parse_line(ParsedMessage& message) {
         pt.erase("log_time");
         std::ostringstream oss;
         boost::property_tree::json_parser::write_json(oss, pt, false);
-        m_line = dateTime + " " + oss.str();
+        m_line = dateTime.substr(0, 23) + " " + oss.str();
     } catch (const std::exception &e) {
         throw OperationFailed(ErrorCode_Failure, __FILENAME__, __LINE__);
     }
