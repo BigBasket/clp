@@ -4,10 +4,13 @@
 #include <Catch2/single_include/catch2/catch.hpp>
 #include <zstd.h>
 
-#include "../src/streaming_compression/passthrough/Compressor.hpp"
-#include "../src/streaming_compression/passthrough/Decompressor.hpp"
-#include "../src/streaming_compression/zstd/Compressor.hpp"
-#include "../src/streaming_compression/zstd/Decompressor.hpp"
+#include "../src/clp/streaming_compression/passthrough/Compressor.hpp"
+#include "../src/clp/streaming_compression/passthrough/Decompressor.hpp"
+#include "../src/clp/streaming_compression/zstd/Compressor.hpp"
+#include "../src/clp/streaming_compression/zstd/Decompressor.hpp"
+
+using clp::ErrorCode_Success;
+using clp::FileWriter;
 
 TEST_CASE("StreamingCompression", "[StreamingCompression]") {
     // Initialize data to test compression and decompression
@@ -28,7 +31,7 @@ TEST_CASE("StreamingCompression", "[StreamingCompression]") {
         // Compress
         FileWriter file_writer;
         file_writer.open(compressed_file_path, FileWriter::OpenMode::CREATE_FOR_WRITING);
-        streaming_compression::zstd::Compressor compressor;
+        clp::streaming_compression::zstd::Compressor compressor;
         compressor.open(file_writer);
         compressor.write(uncompressed_data, ZSTD_CStreamInSize());
         compressor.write(uncompressed_data, uncompressed_data_size / 100);
@@ -42,7 +45,7 @@ TEST_CASE("StreamingCompression", "[StreamingCompression]") {
         file_writer.close();
 
         // Decompress
-        streaming_compression::zstd::Decompressor decompressor;
+        clp::streaming_compression::zstd::Decompressor decompressor;
         REQUIRE(ErrorCode_Success == decompressor.open(compressed_file_path));
         size_t uncompressed_bytes = 0;
         REQUIRE(ErrorCode_Success
@@ -131,7 +134,7 @@ TEST_CASE("StreamingCompression", "[StreamingCompression]") {
         // Compress
         FileWriter file_writer;
         file_writer.open(compressed_file_path, FileWriter::OpenMode::CREATE_FOR_WRITING);
-        streaming_compression::passthrough::Compressor compressor;
+        clp::streaming_compression::passthrough::Compressor compressor;
         compressor.open(file_writer);
         compressor.write(uncompressed_data, uncompressed_data_size / 100);
         compressor.write(uncompressed_data, uncompressed_data_size / 50);
@@ -159,7 +162,7 @@ TEST_CASE("StreamingCompression", "[StreamingCompression]") {
         memory_mapped_compressed_file.open(memory_map_params);
         REQUIRE(memory_mapped_compressed_file.is_open());
 
-        streaming_compression::passthrough::Decompressor decompressor;
+        clp::streaming_compression::passthrough::Decompressor decompressor;
         decompressor.open(memory_mapped_compressed_file.data(), compressed_file_size);
 
         size_t uncompressed_bytes = 0;

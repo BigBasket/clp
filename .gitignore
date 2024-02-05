@@ -1,0 +1,5 @@
+.lint-venv/
+.task/
+build/
+**/dist/
+**/poetry.lock

@@ -2,11 +2,15 @@
 
 #include <Catch2/single_include/catch2/catch.hpp>
 
-#include "../src/EncodedVariableInterpreter.hpp"
-#include "../src/ir/types.hpp"
-#include "../src/streaming_archive/Constants.hpp"
+#include "../src/clp/EncodedVariableInterpreter.hpp"
+#include "../src/clp/ir/types.hpp"
+#include "../src/clp/streaming_archive/Constants.hpp"
 
-using ir::VariablePlaceholder;
+using clp::cVariableDictionaryIdMax;
+using clp::encoded_variable_t;
+using clp::EncodedVariableInterpreter;
+using clp::enum_to_underlying_type;
+using clp::ir::VariablePlaceholder;
 using std::string;
 using std::to_string;
 using std::vector;
@@ -379,12 +383,12 @@ TEST_CASE("EncodedVariableInterpreter", "[EncodedVariableInterpreter]") {
         char const cVarSegmentIndexPath[] = "var.segindex";
 
         // Open writer
-        VariableDictionaryWriter var_dict_writer;
+        clp::VariableDictionaryWriter var_dict_writer;
         var_dict_writer.open(cVarDictPath, cVarSegmentIndexPath, cVariableDictionaryIdMax);
 
         // Test encoding
         vector<encoded_variable_t> encoded_vars;
-        vector<variable_dictionary_id_t> var_ids;
+        vector<clp::variable_dictionary_id_t> var_ids;
 
         string large_val_str = to_string(cVariableDictionaryIdMax) + "0";
         vector<string> var_strs
@@ -405,7 +409,7 @@ TEST_CASE("EncodedVariableInterpreter", "[EncodedVariableInterpreter]") {
               + enum_to_underlying_type(VariablePlaceholder::Dictionary);
         // clang-format on
 
-        LogTypeDictionaryEntry logtype_dict_entry;
+        clp::LogTypeDictionaryEntry logtype_dict_entry;
         EncodedVariableInterpreter::encode_and_add_to_dictionary(
                 msg,
                 logtype_dict_entry,
@@ -433,13 +437,13 @@ TEST_CASE("EncodedVariableInterpreter", "[EncodedVariableInterpreter]") {
         REQUIRE(var_ids.size() == encoded_var_id_ix);
 
         // Open reader
-        VariableDictionaryReader var_dict_reader;
+        clp::VariableDictionaryReader var_dict_reader;
         var_dict_reader.open(cVarDictPath, cVarSegmentIndexPath);
         var_dict_reader.read_new_entries();
 
         // Test searching
         string search_logtype = "here is a string with a small int ";
-        SubQuery sub_query;
+        clp::SubQuery sub_query;
         REQUIRE(EncodedVariableInterpreter::encode_and_search_dictionary(
                 var_strs[0],
                 var_dict_reader,

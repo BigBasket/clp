@@ -3,14 +3,15 @@
 #include <boost/filesystem.hpp>
 #include <Catch2/single_include/catch2/catch.hpp>
 
-#include "../src/streaming_archive/reader/Segment.hpp"
-#include "../src/streaming_archive/writer/Segment.hpp"
-#include "../src/Utils.hpp"
+#include "../src/clp/streaming_archive/reader/Segment.hpp"
+#include "../src/clp/streaming_archive/writer/Segment.hpp"
+#include "../src/clp/Utils.hpp"
 
+using clp::ErrorCode_Success;
 using std::string;
 
 TEST_CASE("Test writing and reading a segment", "[Segment]") {
-    ErrorCode error_code;
+    clp::ErrorCode error_code;
 
     // Initialize data to test compression and decompression
     size_t uncompressed_data_size = 128L * 1024 * 1024;  // 128MB
@@ -24,11 +25,11 @@ TEST_CASE("Test writing and reading a segment", "[Segment]") {
 
     // Create directory for segments
     string segments_dir_path = "unit-test-segment/";
-    error_code = create_directory_structure(segments_dir_path, 0700);
+    error_code = clp::create_directory_structure(segments_dir_path, 0700);
     REQUIRE(ErrorCode_Success == error_code);
 
     // Test segment writing
-    streaming_archive::writer::Segment writer_segment;
+    clp::streaming_archive::writer::Segment writer_segment;
 
     writer_segment.open(segments_dir_path, 0, 0);
     auto segment_id = writer_segment.get_id();
@@ -39,7 +40,7 @@ TEST_CASE("Test writing and reading a segment", "[Segment]") {
     writer_segment.close();
 
     // Test reading
-    streaming_archive::reader::Segment reader_segment;
+    clp::streaming_archive::reader::Segment reader_segment;
 
     error_code = reader_segment.try_open(segments_dir_path, segment_id);
     REQUIRE(ErrorCode_Success == error_code);
