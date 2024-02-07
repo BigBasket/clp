@@ -203,7 +203,7 @@ int main(int argc, char const* argv[]) {
             );
         } else {
             output_handler = std::make_unique<StandardOutputHandler>(
-                    command_line_arguments.get_max_num_results()
+                   false 
             );
         }
 
