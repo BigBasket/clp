@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 import multiprocessing
 import os
@@ -7,19 +8,25 @@ import socket
 import subprocess
 import sys
 import time
+import typing
 import uuid
 
 import yaml
 from clp_py_utils.clp_config import (
+    ALL_TARGET_NAME,
+    CLP_METADATA_TABLE_PREFIX,
     CLPConfig,
     COMPRESSION_SCHEDULER_COMPONENT_NAME,
     COMPRESSION_WORKER_COMPONENT_NAME,
+    CONTROLLER_TARGET_NAME,
     DB_COMPONENT_NAME,
     QUEUE_COMPONENT_NAME,
     REDIS_COMPONENT_NAME,
     RESULTS_CACHE_COMPONENT_NAME,
+    SEARCH_JOBS_TABLE_NAME,
     SEARCH_SCHEDULER_COMPONENT_NAME,
     SEARCH_WORKER_COMPONENT_NAME,
+    WEBUI_COMPONENT_NAME,
 )
 from job_orchestration.scheduler.constants import QueueName
 from pydantic import BaseModel
@@ -42,6 +49,7 @@ from clp_package_utils.general import (
     validate_queue_config,
     validate_redis_config,
     validate_results_cache_config,
+    validate_webui_config,
     validate_worker_config,
 )
 
@@ -65,30 +73,23 @@ def append_docker_port_settings_for_host_ips(
         cmd.append(f"{ip}:{host_port}:{container_port}")
 
 
-def wait_for_database_to_init(container_name: str, clp_config: CLPConfig, timeout: int):
-    # Try to connect to the database
+def wait_for_container_cmd(container_name: str, cmd_to_run: [str], timeout: int):
+    container_exec_cmd = ["docker", "exec", container_name]
+    cmd = container_exec_cmd + cmd_to_run
+
     begin_time = time.time()
-    container_exec_cmd = ["docker", "exec", "-it", container_name]
-    # fmt: off
-    mysqladmin_cmd = [
-        "mysqladmin", "ping",
-        "--silent",
-        "-h", "127.0.0.1",
-        "-u", str(clp_config.database.username),
-        f"--password={clp_config.database.password}",
-    ]
-    # fmt: on
-    cmd = container_exec_cmd + mysqladmin_cmd
+
     while True:
         try:
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, check=True)
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
             return True
         except subprocess.CalledProcessError:
             if time.time() - begin_time > timeout:
                 break
             time.sleep(1)
 
-    logger.error(f"Timeout while waiting for {DB_COMPONENT_NAME} to initialize.")
+    cmd_str = " ".join(cmd_to_run)
+    logger.error(f"Timeout while waiting for command {cmd_str} to run after {timeout} seconds")
     return False
 
 
@@ -145,7 +146,17 @@ def start_db(instance_id: str, clp_config: CLPConfig, conf_dir: pathlib.Path):
         cmd.append("mariadb:10.6.4-focal")
     subprocess.run(cmd, stdout=subprocess.DEVNULL, check=True)
 
-    if not wait_for_database_to_init(container_name, clp_config, 30):
+    # fmt: off
+    mysqladmin_cmd = [
+        "mysqladmin", "ping",
+        "--silent",
+        "-h", "127.0.0.1",
+        "-u", str(clp_config.database.username),
+        f"--password={clp_config.database.password}",
+    ]
+    # fmt: on
+
+    if not wait_for_container_cmd(container_name, mysqladmin_cmd, 30):
         raise EnvironmentError(f"{DB_COMPONENT_NAME} did not initialize in time")
 
     logger.info(f"Started {DB_COMPONENT_NAME}.")
@@ -263,13 +274,9 @@ def start_queue(instance_id: str, clp_config: CLPConfig):
     subprocess.run(cmd, stdout=subprocess.DEVNULL, check=True)
 
     # Wait for queue to start up
-    # fmt: off
-    cmd = [
-        "docker", "exec", "-it", container_name,
-        "rabbitmqctl", "wait", str(rabbitmq_pid_file_path),
-    ]
-    # fmt: on
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, check=True)
+    rabbitmq_cmd = ["rabbitmq-diagnostics", "check_running"]
+    if not wait_for_container_cmd(container_name, rabbitmq_cmd, 60):
+        raise EnvironmentError(f"{QUEUE_COMPONENT_NAME} did not initialize in time")
 
     logger.info(f"Started {QUEUE_COMPONENT_NAME}.")
 
@@ -622,6 +629,104 @@ def generic_start_worker(
     logger.info(f"Started {component_name}.")
 
 
+def update_meteor_settings(
+    parent_key_prefix: str,
+    settings: typing.Dict[str, typing.Any],
+    updates: typing.Dict[str, typing.Any],
+):
+    """
+    Recursively updates the given Meteor settings object with the values from `updates`.
+
+    :param parent_key_prefix: The prefix for keys at this level in the settings dictionary.
+    :param settings: The settings to update.
+    :param updates: The updates.
+    :raises ValueError: If a key in `updates` doesn't exist in `settings`.
+    """
+    for key, value in updates.items():
+        if key not in settings:
+            error_msg = f"{parent_key_prefix}{key} is not a valid configuration key for the webui."
+            raise ValueError(error_msg)
+        if isinstance(value, dict):
+            update_meteor_settings(f"{parent_key_prefix}{key}.", settings[key], value)
+        else:
+            settings[key] = updates[key]
+
+
+def start_webui(instance_id: str, clp_config: CLPConfig, mounts: CLPDockerMounts):
+    logger.info(f"Starting {WEBUI_COMPONENT_NAME}...")
+
+    container_name = f"clp-{WEBUI_COMPONENT_NAME}-{instance_id}"
+    if container_exists(container_name):
+        logger.info(f"{WEBUI_COMPONENT_NAME} already running.")
+        return
+
+    webui_logs_dir = clp_config.logs_directory / WEBUI_COMPONENT_NAME
+    node_path = str(
+        CONTAINER_CLP_HOME / "var" / "www" / "programs" / "server" / "npm" / "node_modules"
+    )
+    settings_json_path = get_clp_home() / "var" / "www" / "settings.json"
+
+    validate_webui_config(clp_config, webui_logs_dir, settings_json_path)
+
+    # Create directories
+    webui_logs_dir.mkdir(exist_ok=True, parents=True)
+
+    container_webui_logs_dir = pathlib.Path("/") / "var" / "log" / WEBUI_COMPONENT_NAME
+    with open(settings_json_path, "r") as settings_json_file:
+        meteor_settings = json.loads(settings_json_file.read())
+    meteor_settings_updates = {
+        "private": {
+            "SqlDbHost": clp_config.database.host,
+            "SqlDbPort": clp_config.database.port,
+            "SqlDbName": clp_config.database.name,
+            "SqlDbSearchJobsTableName": SEARCH_JOBS_TABLE_NAME,
+            "SqlDbClpArchivesTableName": f"{CLP_METADATA_TABLE_PREFIX}archives",
+            "SqlDbClpFilesTableName": f"{CLP_METADATA_TABLE_PREFIX}files",
+        }
+    }
+    update_meteor_settings("", meteor_settings, meteor_settings_updates)
+
+    # Start container
+    # fmt: off
+    container_cmd = [
+        "docker", "run",
+        "-d",
+        "--network", "host",
+        "--rm",
+        "--name", container_name,
+        "-e", f"NODE_PATH={node_path}",
+        "-e", f"MONGO_URL={clp_config.results_cache.get_uri()}",
+        "-e", f"PORT={clp_config.webui.port}",
+        "-e", f"ROOT_URL=http://{clp_config.webui.host}",
+        "-e", f"METEOR_SETTINGS={json.dumps(meteor_settings)}",
+        "-e", f"CLP_DB_USER={clp_config.database.username}",
+        "-e", f"CLP_DB_PASS={clp_config.database.password}",
+        "-e", f"WEBUI_LOGS_DIR={container_webui_logs_dir}",
+        "-e", f"WEBUI_LOGGING_LEVEL={clp_config.webui.logging_level}",
+        "-u", f"{os.getuid()}:{os.getgid()}",
+    ]
+    # fmt: on
+    necessary_mounts = [
+        mounts.clp_home,
+        DockerMount(DockerMountType.BIND, webui_logs_dir, container_webui_logs_dir),
+    ]
+    for mount in necessary_mounts:
+        if mount:
+            container_cmd.append("--mount")
+            container_cmd.append(str(mount))
+    container_cmd.append(clp_config.execution_container)
+
+    node_cmd = [
+        str(CONTAINER_CLP_HOME / "bin" / "node"),
+        str(CONTAINER_CLP_HOME / "var" / "www" / "launcher.js"),
+        str(CONTAINER_CLP_HOME / "var" / "www" / "main.js"),
+    ]
+    cmd = container_cmd + node_cmd
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, check=True)
+
+    logger.info(f"Started {WEBUI_COMPONENT_NAME}.")
+
+
 def main(argv):
     clp_home = get_clp_home()
     default_config_file_path = clp_home / CLP_DEFAULT_CONFIG_FILE_RELATIVE_PATH
@@ -634,7 +739,8 @@ def main(argv):
         help="CLP package configuration file.",
     )
 
-    component_args_parser = args_parser.add_subparsers(dest="component_name")
+    component_args_parser = args_parser.add_subparsers(dest="target")
+    component_args_parser.add_parser(CONTROLLER_TARGET_NAME)
     component_args_parser.add_parser(DB_COMPONENT_NAME)
     component_args_parser.add_parser(QUEUE_COMPONENT_NAME)
     component_args_parser.add_parser(REDIS_COMPONENT_NAME)
@@ -643,6 +749,8 @@ def main(argv):
     component_args_parser.add_parser(SEARCH_SCHEDULER_COMPONENT_NAME)
     component_args_parser.add_parser(COMPRESSION_WORKER_COMPONENT_NAME)
     component_args_parser.add_parser(SEARCH_WORKER_COMPONENT_NAME)
+    component_args_parser.add_parser(WEBUI_COMPONENT_NAME)
+
     args_parser.add_argument(
         "--num-cpus",
         type=int,
@@ -652,10 +760,10 @@ def main(argv):
 
     parsed_args = args_parser.parse_args(argv[1:])
 
-    if parsed_args.component_name:
-        component_name = parsed_args.component_name
+    if parsed_args.target:
+        target = parsed_args.target
     else:
-        component_name = ""
+        target = ALL_TARGET_NAME
 
     try:
         check_dependencies()
@@ -671,30 +779,34 @@ def main(argv):
         )
 
         # Validate and load necessary credentials
-        if component_name in [
-            "",
+        if target in (
+            ALL_TARGET_NAME,
+            CONTROLLER_TARGET_NAME,
             DB_COMPONENT_NAME,
             COMPRESSION_SCHEDULER_COMPONENT_NAME,
             SEARCH_SCHEDULER_COMPONENT_NAME,
-        ]:
+            WEBUI_COMPONENT_NAME,
+        ):
             validate_and_load_db_credentials_file(clp_config, clp_home, True)
-        if component_name in [
-            "",
+        if target in (
+            ALL_TARGET_NAME,
+            CONTROLLER_TARGET_NAME,
             QUEUE_COMPONENT_NAME,
             COMPRESSION_SCHEDULER_COMPONENT_NAME,
             SEARCH_SCHEDULER_COMPONENT_NAME,
             COMPRESSION_WORKER_COMPONENT_NAME,
             SEARCH_WORKER_COMPONENT_NAME,
-        ]:
+        ):
             validate_and_load_queue_credentials_file(clp_config, clp_home, True)
-        if component_name in [
-            "",
+        if target in (
+            ALL_TARGET_NAME,
+            CONTROLLER_TARGET_NAME,
             REDIS_COMPONENT_NAME,
             COMPRESSION_SCHEDULER_COMPONENT_NAME,
             SEARCH_SCHEDULER_COMPONENT_NAME,
             COMPRESSION_WORKER_COMPONENT_NAME,
             SEARCH_WORKER_COMPONENT_NAME,
-        ]:
+        ):
             validate_and_load_redis_credentials_file(clp_config, clp_home, True)
 
         clp_config.validate_data_dir()
@@ -706,9 +818,9 @@ def main(argv):
     # Get the number of CPU cores to use
     num_cpus = multiprocessing.cpu_count() // 2
     if (
-        COMPRESSION_WORKER_COMPONENT_NAME == component_name
-        or SEARCH_WORKER_COMPONENT_NAME == component_name
-    ) and parsed_args.num_cpus != 0:
+        target in (COMPRESSION_WORKER_COMPONENT_NAME, SEARCH_WORKER_COMPONENT_NAME)
+        and parsed_args.num_cpus != 0
+    ):
         num_cpus = parsed_args.num_cpus
 
     container_clp_config, mounts = generate_container_config(clp_config, clp_home)
@@ -732,25 +844,32 @@ def main(argv):
         conf_dir = clp_home / "etc"
 
         # Start components
-        if "" == component_name or DB_COMPONENT_NAME == component_name:
+        if target in (ALL_TARGET_NAME, DB_COMPONENT_NAME):
             start_db(instance_id, clp_config, conf_dir)
+        if target in (ALL_TARGET_NAME, CONTROLLER_TARGET_NAME, DB_COMPONENT_NAME):
             create_db_tables(instance_id, clp_config, container_clp_config, mounts)
-        if "" == component_name or QUEUE_COMPONENT_NAME == component_name:
+        if target in (ALL_TARGET_NAME, CONTROLLER_TARGET_NAME, QUEUE_COMPONENT_NAME):
             start_queue(instance_id, clp_config)
-        if "" == component_name or REDIS_COMPONENT_NAME == component_name:
+        if target in (ALL_TARGET_NAME, CONTROLLER_TARGET_NAME, REDIS_COMPONENT_NAME):
             start_redis(instance_id, clp_config, conf_dir)
-        if "" == component_name or RESULTS_CACHE_COMPONENT_NAME == component_name:
+        if target in (ALL_TARGET_NAME, RESULTS_CACHE_COMPONENT_NAME):
             start_results_cache(instance_id, clp_config, conf_dir)
-        if "" == component_name or COMPRESSION_SCHEDULER_COMPONENT_NAME == component_name:
+        if target in (
+            ALL_TARGET_NAME,
+            CONTROLLER_TARGET_NAME,
+            COMPRESSION_SCHEDULER_COMPONENT_NAME,
+        ):
             start_compression_scheduler(instance_id, clp_config, container_clp_config, mounts)
-        if "" == component_name or SEARCH_SCHEDULER_COMPONENT_NAME == component_name:
+        if target in (ALL_TARGET_NAME, CONTROLLER_TARGET_NAME, SEARCH_SCHEDULER_COMPONENT_NAME):
             start_search_scheduler(instance_id, clp_config, container_clp_config, mounts)
-        if "" == component_name or COMPRESSION_WORKER_COMPONENT_NAME == component_name:
+        if target in (ALL_TARGET_NAME, COMPRESSION_WORKER_COMPONENT_NAME):
             start_compression_worker(
                 instance_id, clp_config, container_clp_config, num_cpus, mounts
             )
-        if "" == component_name or SEARCH_WORKER_COMPONENT_NAME == component_name:
+        if target in (ALL_TARGET_NAME, SEARCH_WORKER_COMPONENT_NAME):
             start_search_worker(instance_id, clp_config, container_clp_config, num_cpus, mounts)
+        if target in (ALL_TARGET_NAME, CONTROLLER_TARGET_NAME, WEBUI_COMPONENT_NAME):
+            start_webui(instance_id, clp_config, mounts)
 
     except Exception as ex:
         # Stop CLP
