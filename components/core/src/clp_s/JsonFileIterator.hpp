@@ -22,7 +22,7 @@ public:
      */
     explicit JsonFileIterator(
             std::string const& file_name,
-            size_t buf_size = 1024 * 1024 /*1MB default*/
+            size_t buf_size = 1024 * 1024 * 100 /*100 MB default*/
     );
     ~JsonFileIterator();
 
