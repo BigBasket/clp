@@ -31,7 +31,8 @@ public:
            std::string archives_dir,
            std::shared_ptr<TimestampDictionaryReader> timestamp_dict,
            std::unique_ptr<OutputHandler> output_handler,
-           bool ignore_case)
+           bool ignore_case,
+           uint64_t max_num_results)
             : m_schema_tree(std::move(tree)),
               m_schemas(std::move(schemas)),
               m_match(match),
@@ -39,7 +40,8 @@ public:
               m_archives_dir(std::move(archives_dir)),
               m_timestamp_dict(std::move(timestamp_dict)),
               m_output_handler(std::move(output_handler)),
-              m_ignore_case(ignore_case) {}
+              m_ignore_case(ignore_case),
+              m_max_num_results{max_num_results} {}
 
     /**
      * Filters messages from all archives
@@ -52,6 +54,7 @@ private:
     std::string m_archives_dir;
     std::unique_ptr<OutputHandler> m_output_handler;
     bool m_ignore_case;
+    uint64_t m_max_num_results;
 
     // variables for the current schema being filtered
     std::vector<BaseColumnReader*> m_searched_columns;

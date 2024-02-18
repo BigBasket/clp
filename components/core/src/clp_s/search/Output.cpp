@@ -19,6 +19,7 @@
 namespace clp_s::search {
 void Output::filter() {
     auto top_level_expr = m_expr;
+    auto total_matched_results = 0;
 
     for (auto const& archive : ReaderUtils::get_archives(m_archives_dir)) {
         std::vector<int32_t> matched_schemas;
@@ -113,7 +114,12 @@ void Output::filter() {
                 }
             } else {
                 while (reader.get_next_message(message, this)) {
+                    if (total_matched_results >= m_max_num_results) {
+
+                        break;
+                    }
                     m_output_handler->write(message);
+                    total_matched_results = total_matched_results + 1;
                 }
             }
 

@@ -223,7 +223,8 @@ bool search_archive(
             archive_dir,
             timestamp_dict,
             std::move(output_handler),
-            command_line_arguments.get_ignore_case()
+            command_line_arguments.get_ignore_case(),
+            command_line_arguments.get_max_num_results()
     );
     output.filter();
 
